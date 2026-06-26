@@ -2,8 +2,6 @@
 
 `wasm32-unknown-unknown` bindings to the libsqlite3 library. 
 
-`rusqlite` and `diesel` have already been integrated with this crate, you can now use sqlite out of the box.
-
 ## Usage 
 
 ```toml
