@@ -98,3 +98,7 @@ Contributions are welcome!
 * [`sqlite-web-rs`](https://github.com/xmtp/sqlite-web-rs): A SQLite WebAssembly backend for Diesel.
 * [`wa-sqlite`](https://github.com/rhashimoto/wa-sqlite): WebAssembly SQLite with support for browser storage extensions.
 * [`SQLite3MultipleCiphers`](https://github.com/utelle/SQLite3MultipleCiphers): SQLite3 encryption extension with support for multiple ciphers.
+
+## Friends
+
+- [moli](https://github.com/lexmount/moli) - Best browser for AI Agent, written in pure Rust.
