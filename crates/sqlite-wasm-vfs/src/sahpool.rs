@@ -69,7 +69,23 @@ const HEADER_OFFSET_DATA: usize = SECTOR_SIZE;
 const PERSISTENT_FILE_TYPES: i32 =
     SQLITE_OPEN_MAIN_DB | SQLITE_OPEN_MAIN_JOURNAL | SQLITE_OPEN_SUPER_JOURNAL | SQLITE_OPEN_WAL;
 
+const JS_MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
+
 type Result<T, E = OpfsSAHError> = std::result::Result<T, E>;
+
+fn opfs_data_offset(offset: u64) -> VfsResult<f64> {
+    let offset = offset
+        .checked_add(HEADER_OFFSET_DATA as u64)
+        .filter(|&offset| offset <= JS_MAX_SAFE_INTEGER)
+        .ok_or_else(|| {
+            VfsError::new(
+                SQLITE_IOERR,
+                "OPFS offset exceeds JavaScript's safe integer range".into(),
+            )
+        })?;
+
+    Ok(offset as f64)
+}
 
 fn read_write_options(at: f64) -> FileSystemReadWriteOptions {
     let options = FileSystemReadWriteOptions::new();
@@ -532,12 +548,10 @@ impl OpfsSAHPool {
 
 impl VfsFile for SyncAccessFile {
     fn read(&self, buf: &mut [u8], offset: usize) -> VfsResult<bool> {
+        let offset = offset as u64; // TODO: Remove when `VfsFile::read()` takes `offset: u64`
         let n_read = self
             .handle
-            .read_with_u8_array_and_options(
-                buf,
-                &read_write_options((HEADER_OFFSET_DATA + offset) as f64),
-            )
+            .read_with_u8_array_and_options(buf, &read_write_options(opfs_data_offset(offset)?))
             .map_err(OpfsSAHError::Read)
             .map_err(|err| err.vfs_err(SQLITE_IOERR))?;
 
@@ -550,12 +564,10 @@ impl VfsFile for SyncAccessFile {
     }
 
     fn write(&mut self, buf: &[u8], offset: usize) -> VfsResult<()> {
+        let offset = offset as u64; // TODO: Remove when `VfsFile::write()` takes `offset: u64`
         let n_write = self
             .handle
-            .write_with_u8_array_and_options(
-                buf,
-                &read_write_options((HEADER_OFFSET_DATA + offset) as f64),
-            )
+            .write_with_u8_array_and_options(buf, &read_write_options(opfs_data_offset(offset)?))
             .map_err(OpfsSAHError::Write)
             .map_err(|err| err.vfs_err(SQLITE_IOERR))?;
 
@@ -567,8 +579,9 @@ impl VfsFile for SyncAccessFile {
     }
 
     fn truncate(&mut self, size: usize) -> VfsResult<()> {
+        let size = size as u64; // TODO: Remove when `VfsFile::truncate()` takes `size: u64`
         self.handle
-            .truncate_with_f64((HEADER_OFFSET_DATA + size) as f64)
+            .truncate_with_f64(opfs_data_offset(size)?)
             .map_err(OpfsSAHError::Truncate)
             .map_err(|err| err.vfs_err(SQLITE_IOERR))
     }
@@ -979,11 +992,22 @@ pub async fn install<C: OsCallback>(
 #[cfg(test)]
 mod tests {
     use super::{
-        OpfsSAHPool, OpfsSAHPoolCfgBuilder, SyncAccessFile, SyncAccessHandleAppData,
-        SyncAccessHandleStore,
+        opfs_data_offset, OpfsSAHPool, OpfsSAHPoolCfgBuilder, SyncAccessFile,
+        SyncAccessHandleAppData, SyncAccessHandleStore, HEADER_OFFSET_DATA, JS_MAX_SAFE_INTEGER,
     };
     use rsqlite_vfs::{test_suite::test_vfs_store, VfsAppData};
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn test_opfs_data_offset() {
+        assert_eq!(opfs_data_offset(0).unwrap(), HEADER_OFFSET_DATA as f64);
+
+        let max = JS_MAX_SAFE_INTEGER - HEADER_OFFSET_DATA as u64;
+        assert_eq!(opfs_data_offset(max).unwrap(), JS_MAX_SAFE_INTEGER as f64);
+
+        assert!(opfs_data_offset(max + 1).is_err());
+        assert!(opfs_data_offset(u64::MAX).is_err());
+    }
 
     #[wasm_bindgen_test]
     async fn test_opfs_vfs_store() {

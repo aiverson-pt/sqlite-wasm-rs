@@ -135,10 +135,17 @@ impl MemChunksFile {
 
 impl VfsFile for MemChunksFile {
     fn read(&self, buf: &mut [u8], offset: usize) -> VfsResult<bool> {
+        let offset = offset as u64;
         let Some(chunk_size) = self.chunk_size else {
             buf.fill(0);
             return Ok(false);
         };
+
+        if offset > usize::MAX as u64 {
+            buf.fill(0);
+            return Ok(false);
+        }
+        let offset = offset as usize;
 
         if self.file_size <= offset {
             buf.fill(0);
@@ -178,9 +185,22 @@ impl VfsFile for MemChunksFile {
     }
 
     fn write(&mut self, buf: &[u8], offset: usize) -> VfsResult<()> {
+        let offset = offset as u64;
         if buf.is_empty() {
             return Ok(());
         }
+
+        let end_offset = offset
+            .checked_add(buf.len() as u64)
+            .ok_or_else(|| VfsError::new(SQLITE_IOERR, "Write offset overflow".into()))?;
+        if end_offset > usize::MAX as u64 {
+            return Err(VfsError::new(
+                SQLITE_IOERR,
+                "Write exceeds addressable memory".into(),
+            ));
+        }
+        let end_offset = end_offset as usize;
+        let offset = offset as usize;
 
         let chunk_size = if let Some(chunk_size) = self.chunk_size {
             chunk_size
@@ -190,7 +210,7 @@ impl VfsFile for MemChunksFile {
             size
         };
 
-        let new_length = self.file_size.max(offset + buf.len());
+        let new_length = self.file_size.max(end_offset);
 
         if chunk_size == buf.len() && offset % chunk_size == 0 {
             for _ in self.chunks.len()..offset / chunk_size {
@@ -233,6 +253,9 @@ impl VfsFile for MemChunksFile {
     }
 
     fn truncate(&mut self, size: usize) -> VfsResult<()> {
+        let size = size as u64;
+        let size = core::cmp::min(size, usize::MAX as u64) as usize;
+
         if let Some(chunk_size) = self.chunk_size {
             if size == 0 {
                 core::mem::take(&mut self.chunks);
